@@ -1054,7 +1054,7 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
 
                     <div className="flex items-center gap-3">
                         {/* View tabs */}
-                        <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                        <div className="flex gap-1 overflow-x-auto no-scrollbar min-w-0">
                             {[
                                 { id: "log",         label: "LOG"         },
                                 { id: "history",     label: "HISTORY"     },
@@ -1083,7 +1083,7 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
 
                         {/* User avatar + sign-out */}
                         {user && (
-                            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+                            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800 shrink-0">
                                 <div className="w-7 h-7 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0"
                                      title={user.user_metadata?.display_name || user.email}>
                   <span className="text-amber-400 text-xs font-bold leading-none select-none">
