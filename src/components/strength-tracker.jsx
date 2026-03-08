@@ -1045,14 +1045,17 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
             {/* ── App Header ── */}
             <header className="border-b border-zinc-800 px-4 py-4 sticky top-0 z-20 bg-zinc-950/95 backdrop-blur">
                 <div className="max-w-2xl mx-auto flex items-center justify-between">
-                    <div>
+
+                    {/* 1. Logo Area (Added shrink-0 and mr-4) */}
+                    <div className="shrink-0 mr-4">
                         <div className="text-amber-500 font-bold text-lg tracking-tight leading-none">
                             STR<span className="text-zinc-400">/</span>VOL
                         </div>
                         <div className="text-zinc-600 text-xs mt-0.5">STRENGTH &amp; VOLUME TRACKER</div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    {/* 2. Navigation Area (Added flex-1, justify-end, and min-w-0) */}
+                    <div className="flex items-center gap-3 flex-1 justify-end min-w-0">
                         {/* View tabs */}
                         <div className="flex gap-1 overflow-x-auto no-scrollbar min-w-0">
                             {[
@@ -1086,13 +1089,13 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                             <div className="flex items-center gap-2 pl-2 border-l border-zinc-800 shrink-0">
                                 <div className="w-7 h-7 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0"
                                      title={user.user_metadata?.display_name || user.email}>
-                  <span className="text-amber-400 text-xs font-bold leading-none select-none">
-                    {(user.user_metadata?.display_name || user.email || "?").charAt(0).toUpperCase()}
-                  </span>
+                                  <span className="text-amber-400 text-xs font-bold leading-none select-none">
+                                    {(user.user_metadata?.display_name || user.email || "?").charAt(0).toUpperCase()}
+                                  </span>
                                 </div>
                                 {onSignOut && (
                                     <button onClick={onSignOut} aria-label="Sign out" title="Sign out"
-                                            className="text-zinc-600 hover:text-red-400 transition-colors">
+                                            className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                                             <polyline points="16 17 21 12 16 7"/>
