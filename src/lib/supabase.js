@@ -314,3 +314,181 @@ export function subscribeToSessions(onInsert) {
 
     return () => supabase.removeChannel(channel);
 }
+// ─────────────────────────────────────────────────────────────
+//  Nutrition helpers
+//  Append these to the bottom of src/lib/supabase.js
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Upsert (insert or update) a daily nutrition log entry.
+ *
+ * Because the table has a UNIQUE(user_id, log_date) constraint,
+ * calling this twice on the same date simply updates the row —
+ * no need for a separate "edit" function.
+ *
+ * @param {Object} payload
+ * @param {string} payload.log_date   ISO date string "YYYY-MM-DD"
+ * @param {number} payload.calories
+ * @param {number} payload.protein_g
+ * @param {number} payload.carbs_g
+ * @param {number} payload.fats_g
+ * @param {string} [payload.notes]    Optional free-text note
+ *
+ * @returns {{ data, error }}
+ */
+export async function saveDailyNutrition({ log_date, calories, protein_g, carbs_g, fats_g, notes = null }) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { data: null, error: new Error("Not authenticated") };
+
+    return supabase
+        .from("daily_nutrition")
+        .upsert(
+            {
+                user_id:   user.id,
+                log_date,
+                calories,
+                protein_g,
+                carbs_g,
+                fats_g,
+                notes,
+            },
+            {
+                // Match on the unique key — if a row already exists for
+                // this user + date it will be updated, otherwise inserted.
+                onConflict: "user_id,log_date",
+                ignoreDuplicates: false,
+            }
+        )
+        .select()
+        .single();
+}
+
+/**
+ * Fetch nutrition history for the current user.
+ *
+ * @param {number} days   How many days back to fetch (default 30)
+ * @returns {{ data: Array<DailyNutrition>, error }}
+ *
+ * Each row shape:
+ *   { id, user_id, log_date, calories, protein_g, carbs_g, fats_g, notes, created_at, updated_at }
+ */
+export async function fetchNutritionHistory(days = 30) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const iso = since.toISOString().split("T")[0]; // "YYYY-MM-DD"
+
+    return supabase
+        .from("daily_nutrition")
+        .select("id, log_date, calories, protein_g, carbs_g, fats_g, notes, updated_at")
+        .gte("log_date", iso)
+        .order("log_date", { ascending: false });
+}
+
+/**
+ * Delete a single daily_nutrition row by its primary key.
+ *
+ * @param {string} id   UUID of the row to delete
+ * @returns {{ error }}
+ */
+export async function deleteNutritionEntry(id) {
+    return supabase
+        .from("daily_nutrition")
+        .delete()
+        .eq("id", id);
+}
+// ─────────────────────────────────────────────────────────────
+//  Analytics helpers
+//  Append these to the bottom of src/lib/supabase.js
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all data needed by AnalyticsDashboard in a single call.
+ *
+ * Returns two parallel arrays that the component joins by date
+ * on the client — keeping the query simple and avoiding a
+ * server-side JOIN across user-owned tables.
+ *
+ * @param {number} days  Look-back window in days (default 60)
+ *
+ * @returns {{
+ *   sessions:  Array<{ session_date, total_volume_kg, sleep_hours, name }>,
+ *   nutrition: Array<{ log_date, calories, protein_g, carbs_g, fats_g }>,
+ *   error:     Error | null
+ * }}
+ */
+export async function fetchAnalyticsData(days = 60) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const isoSince = since.toISOString(); // full ISO for timestamptz comparison
+
+    // Run both queries in parallel
+    const [sessionsResult, nutritionResult] = await Promise.all([
+        supabase
+            .from("sessions")
+            .select("session_date, total_volume_kg, sleep_hours, name")
+            .gte("session_date", isoSince)
+            .order("session_date", { ascending: true }),
+
+        supabase
+            .from("daily_nutrition")
+            .select("log_date, calories, protein_g, carbs_g, fats_g")
+            .gte("log_date", isoSince.split("T")[0]) // date column needs "YYYY-MM-DD"
+            .order("log_date", { ascending: true }),
+    ]);
+
+    // Surface the first error encountered, if any
+    const error = sessionsResult.error ?? nutritionResult.error ?? null;
+
+    return {
+        sessions:  sessionsResult.data  ?? [],
+        nutrition: nutritionResult.data ?? [],
+        error,
+    };
+}
+// ─────────────────────────────────────────────────────────────
+//  Leaderboard helpers
+//  Append these to the bottom of src/lib/supabase.js
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the global leaderboard for a specific exercise by
+ * calling the `get_global_leaderboard` SECURITY DEFINER function.
+ *
+ * @param {string} exerciseName
+ *   One of: 'Back Squat' | 'Bench Press' | 'Conventional Deadlift'
+ *   (or any exercise name in the exercises table)
+ *
+ * @returns {{
+ *   data: Array<{
+ *     rank:            number,
+ *     user_id:         string,   // uuid
+ *     display_name:    string,
+ *     best_e1rm_kg:    number,
+ *     best_weight_kg:  number,
+ *     total_sets:      number,
+ *   }>,
+ *   error: Error | null
+ * }}
+ *
+ * Usage:
+ *   const { data, error } = await fetchLeaderboardData('Bench Press');
+ */
+export async function fetchLeaderboardData(exerciseName) {
+    const { data, error } = await supabase.rpc("get_global_leaderboard", {
+        p_exercise_name: exerciseName,
+    });
+
+    if (error) return { data: [], error };
+
+    // Coerce Postgres numeric strings to JS numbers for chart / display use
+    const rows = (data ?? []).map(row => ({
+        rank:           Number(row.rank),
+        user_id:        row.user_id,
+        display_name:   row.display_name ?? "Anonymous",
+        best_e1rm_kg:   row.best_e1rm_kg  != null ? Number(row.best_e1rm_kg)  : null,
+        best_weight_kg: row.best_weight_kg != null ? Number(row.best_weight_kg) : null,
+        total_sets:     Number(row.total_sets),
+    }));
+
+    return { data: rows, error: null };
+}

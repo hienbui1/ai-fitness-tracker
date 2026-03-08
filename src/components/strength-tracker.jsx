@@ -14,8 +14,16 @@
  * state (not persisted — trivial to re-enter).
  *
  * Props:
- *   user      — Supabase User object from App.jsx
- *   onSignOut — async fn that calls supabase.auth.signOut()
+ *   user                  — Supabase User object from App.jsx
+ *   onSignOut             — async fn that calls supabase.auth.signOut()
+ *   coachComponent        — <AICoach user={user} /> passed in from App.jsx;
+ *                           rendered when the "coach" tab is active
+ *   nutritionComponent    — <NutritionTracker user={user} /> passed in from
+ *                           App.jsx; rendered when the "nutrition" tab is active
+ *   analyticsComponent    — <AnalyticsDashboard user={user} /> passed in from
+ *                           App.jsx; rendered when the "analytics" tab is active
+ *   leaderboardComponent  — <Leaderboard user={user} /> passed in from
+ *                           App.jsx; rendered when the "leaderboard" tab is active
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -876,7 +884,7 @@ function ProgressChart() {
 }
 
 // ── Main StrengthTracker ───────────────────────────────────────
-export default function StrengthTracker({ user, onSignOut }) {
+export default function StrengthTracker({ user, onSignOut, coachComponent, nutritionComponent, analyticsComponent, leaderboardComponent }) {
     // ── Active session state ──────────────────────────────────
     const [blocks, setBlocks]                     = useState([]);
     const [showPicker, setShowPicker]             = useState(false);
@@ -1047,10 +1055,28 @@ export default function StrengthTracker({ user, onSignOut }) {
                     <div className="flex items-center gap-3">
                         {/* View tabs */}
                         <div className="flex gap-1">
-                            {["log","history"].map(v => (
-                                <button key={v} onClick={() => setView(v)}
-                                        className={`px-3 py-1.5 text-xs rounded transition-colors uppercase tracking-widest ${view === v ? "bg-amber-500 text-zinc-900 font-bold" : "text-zinc-500 hover:text-zinc-300"}`}>
-                                    {v}
+                            {[
+                                { id: "log",         label: "LOG"         },
+                                { id: "history",     label: "HISTORY"     },
+                                { id: "nutrition",   label: "NUTRITION"   },
+                                { id: "analytics",   label: "ANALYTICS"   },
+                                { id: "leaderboard", label: "LEADERBOARD" },
+                                { id: "coach",       label: "AI COACH"    },
+                            ].map(({ id, label }) => (
+                                <button key={id} onClick={() => setView(id)}
+                                        className={`px-3 py-1.5 text-xs rounded transition-colors uppercase tracking-widest
+                    ${view === id
+                                            ? id === "coach"
+                                                ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold"
+                                                : id === "nutrition"
+                                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold"
+                                                    : id === "analytics"
+                                                        ? "bg-violet-500/20 text-violet-400 border border-violet-500/40 font-bold"
+                                                        : id === "leaderboard"
+                                                            ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 font-bold"
+                                                            : "bg-amber-500 text-zinc-900 font-bold"
+                                            : "text-zinc-500 hover:text-zinc-300"}`}>
+                                    {label}
                                 </button>
                             ))}
                         </div>
@@ -1267,12 +1293,58 @@ export default function StrengthTracker({ user, onSignOut }) {
                         ))}
                     </div>
                 )}
+                {/* ══════════════════ LEADERBOARD VIEW ════════════ */}
+                {view === "leaderboard" && (
+                    <div>
+                        {leaderboardComponent ?? (
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
+                                Leaderboard unavailable.
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ══════════════════ ANALYTICS VIEW ══════════════ */}
+                {view === "analytics" && (
+                    <div>
+                        {analyticsComponent ?? (
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
+                                Analytics dashboard unavailable.
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ══════════════════ NUTRITION VIEW ══════════════ */}
+                {view === "nutrition" && (
+                    <div>
+                        {nutritionComponent ?? (
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
+                                Nutrition tracker unavailable.
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ══════════════════ COACH VIEW ══════════════════ */}
+                {view === "coach" && (
+                    <div className="-mx-4 -my-6 flex flex-col" style={{ height:"calc(100vh - 69px)" }}>
+                        {coachComponent ?? (
+                            <div className="flex-1 flex items-center justify-center text-zinc-700 text-sm">
+                                AI Coach unavailable.
+                            </div>
+                        )}
+                    </div>
+                )}
+
             </main>
 
-            {/* Footer */}
-            <footer className="text-center text-zinc-800 text-xs py-8 border-t border-zinc-900 mt-10">
-                STR/VOL v1.0 · Supabase
-            </footer>
+            {/* Footer — hidden on full-screen tabs */}
+            {view !== "coach" && view !== "nutrition" && view !== "analytics" && view !== "leaderboard" && (
+                <footer className="text-center text-zinc-800 text-xs py-8 border-t border-zinc-900 mt-10">
+                    STR/VOL v1.0 · Supabase
+                </footer>
+            )}
 
             {/* Modals */}
             {showPicker && (
