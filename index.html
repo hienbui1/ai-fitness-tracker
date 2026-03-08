@@ -2,9 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Fitness Tracker</title>
+
+  <!-- PWA theme colour — paints the browser chrome / status bar zinc-950 -->
+  <meta name="theme-color" content="#09090b" />
+
+  <!-- Fallback for older Android / Samsung Internet -->
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- iOS Safari "Add to Home Screen" support -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="STR/VOL" />
+
+  <!-- Icons -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <!-- Manifest injected automatically by vite-plugin-pwa at build time,
+       but this explicit link is a useful fallback for some browsers -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <title>STR/VOL Tracker</title>
 </head>
 <body>
 <div id="root"></div>
