@@ -1054,7 +1054,7 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
 
                     <div className="flex items-center gap-3">
                         {/* View tabs */}
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 overflow-x-auto no-scrollbar">
                             {[
                                 { id: "log",         label: "LOG"         },
                                 { id: "history",     label: "HISTORY"     },

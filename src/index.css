@@ -7,3 +7,59 @@
 * {
     box-sizing: border-box;
 }
+/* ── PWA / iOS baseline ─────────────────────────────────────── */
+
+/* Lock the overscroll bounce colour on iOS Safari.
+   Both html and body need it — Safari checks both.        */
+html {
+    background-color: #09090b;
+    /* Prevent any horizontal overflow from stretching the viewport */
+    overflow-x: hidden;
+}
+
+body {
+    background-color: #09090b;
+    /* Belt-and-suspenders: block horizontal scroll at body level too */
+    overflow-x: hidden;
+    /* Smooth momentum scrolling on iOS for any scrollable child */
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Utility: hide scrollbars while keeping element scrollable.
+   Apply to any overflow-x-auto container you don't want
+   to show a scrollbar track on desktop or iOS.            */
+.no-scrollbar {
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* IE / old Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+    display: none;                  /* Chrome, Safari, iOS WebKit */
+}
+/* ── PWA / iOS baseline ─────────────────────────────────────── */
+
+/* Lock the overscroll bounce colour on iOS Safari.
+   Both html and body need it — Safari checks both.        */
+html {
+    background-color: #09090b;
+    /* Prevent any horizontal overflow from stretching the viewport */
+    overflow-x: hidden;
+}
+
+body {
+    background-color: #09090b;
+    /* Belt-and-suspenders: block horizontal scroll at body level too */
+    overflow-x: hidden;
+    /* Smooth momentum scrolling on iOS for any scrollable child */
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Utility: hide scrollbars while keeping element scrollable.
+   Apply to any overflow-x-auto container you don't want
+   to show a scrollbar track on desktop or iOS.            */
+.no-scrollbar {
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* IE / old Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+    display: none;                  /* Chrome, Safari, iOS WebKit */
+}
