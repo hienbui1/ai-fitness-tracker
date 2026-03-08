@@ -1064,7 +1064,7 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                 { id: "coach",       label: "AI COACH"    },
                             ].map(({ id, label }) => (
                                 <button key={id} onClick={() => setView(id)}
-                                        className={`px-3 py-1.5 text-xs rounded transition-colors uppercase tracking-widest
+                                        className={`shrink-0 px-3 py-1.5 text-xs rounded transition-colors uppercase tracking-widest
                     ${view === id
                                             ? id === "coach"
                                                 ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold"
