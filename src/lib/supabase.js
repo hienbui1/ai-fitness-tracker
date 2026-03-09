@@ -70,7 +70,7 @@ export function getCurrentUser() {
  * Save a complete workout session.
  *
  * Mirrors the LocalStorage payload shape:
- *   { name, blocks, totalVolume, totalSets, readiness }
+ * { name, blocks, totalVolume, totalSets, readiness }
  *
  * Returns { session, error }.
  */
@@ -227,7 +227,7 @@ export async function fetchLoggedExercises() {
  * PRs without scanning sets on the client.
  *
  * Returns an object shaped like buildHistoricalPRs() output:
- *   { "Bench Press": { maxWeight: 120, maxE1rm: 142 }, ... }
+ * { "Bench Press": { maxWeight: 120, maxE1rm: 142 }, ... }
  */
 export async function fetchUserPRs() {
     const { data, error } = await supabase.rpc("get_user_prs");
@@ -293,9 +293,9 @@ export async function deleteTemplate(templateId) {
  * Returns an unsubscribe function.
  *
  * Usage:
- *   const unsub = subscribeToSessions((newSession) => { ... });
- *   // later:
- *   unsub();
+ * const unsub = subscribeToSessions((newSession) => { ... });
+ * // later:
+ * unsub();
  */
 export function subscribeToSessions(onInsert) {
     const channel = supabase
@@ -314,91 +314,9 @@ export function subscribeToSessions(onInsert) {
 
     return () => supabase.removeChannel(channel);
 }
-// ─────────────────────────────────────────────────────────────
-//  Nutrition helpers
-//  Append these to the bottom of src/lib/supabase.js
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Upsert (insert or update) a daily nutrition log entry.
- *
- * Because the table has a UNIQUE(user_id, log_date) constraint,
- * calling this twice on the same date simply updates the row —
- * no need for a separate "edit" function.
- *
- * @param {Object} payload
- * @param {string} payload.log_date   ISO date string "YYYY-MM-DD"
- * @param {number} payload.calories
- * @param {number} payload.protein_g
- * @param {number} payload.carbs_g
- * @param {number} payload.fats_g
- * @param {string} [payload.notes]    Optional free-text note
- *
- * @returns {{ data, error }}
- */
-export async function saveDailyNutrition({ log_date, calories, protein_g, carbs_g, fats_g, notes = null }) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { data: null, error: new Error("Not authenticated") };
-
-    return supabase
-        .from("daily_nutrition")
-        .upsert(
-            {
-                user_id:   user.id,
-                log_date,
-                calories,
-                protein_g,
-                carbs_g,
-                fats_g,
-                notes,
-            },
-            {
-                // Match on the unique key — if a row already exists for
-                // this user + date it will be updated, otherwise inserted.
-                onConflict: "user_id,log_date",
-                ignoreDuplicates: false,
-            }
-        )
-        .select()
-        .single();
-}
-
-/**
- * Fetch nutrition history for the current user.
- *
- * @param {number} days   How many days back to fetch (default 30)
- * @returns {{ data: Array<DailyNutrition>, error }}
- *
- * Each row shape:
- *   { id, user_id, log_date, calories, protein_g, carbs_g, fats_g, notes, created_at, updated_at }
- */
-export async function fetchNutritionHistory(days = 30) {
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    const iso = since.toISOString().split("T")[0]; // "YYYY-MM-DD"
-
-    return supabase
-        .from("daily_nutrition")
-        .select("id, log_date, calories, protein_g, carbs_g, fats_g, notes, updated_at")
-        .gte("log_date", iso)
-        .order("log_date", { ascending: false });
-}
-
-/**
- * Delete a single daily_nutrition row by its primary key.
- *
- * @param {string} id   UUID of the row to delete
- * @returns {{ error }}
- */
-export async function deleteNutritionEntry(id) {
-    return supabase
-        .from("daily_nutrition")
-        .delete()
-        .eq("id", id);
-}
 // ─────────────────────────────────────────────────────────────
 //  Analytics helpers
-//  Append these to the bottom of src/lib/supabase.js
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -411,9 +329,9 @@ export async function deleteNutritionEntry(id) {
  * @param {number} days  Look-back window in days (default 60)
  *
  * @returns {{
- *   sessions:  Array<{ session_date, total_volume_kg, sleep_hours, name }>,
- *   nutrition: Array<{ log_date, calories, protein_g, carbs_g, fats_g }>,
- *   error:     Error | null
+ * sessions:  Array<{ session_date, total_volume_kg, sleep_hours, name }>,
+ * nutrition: Array<{ log_date, calories, protein_g, carbs_g, fats_g }>,
+ * error:     Error | null
  * }}
  */
 export async function fetchAnalyticsData(days = 60) {
@@ -445,9 +363,9 @@ export async function fetchAnalyticsData(days = 60) {
         error,
     };
 }
+
 // ─────────────────────────────────────────────────────────────
 //  Leaderboard helpers
-//  Append these to the bottom of src/lib/supabase.js
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -455,23 +373,23 @@ export async function fetchAnalyticsData(days = 60) {
  * calling the `get_global_leaderboard` SECURITY DEFINER function.
  *
  * @param {string} exerciseName
- *   One of: 'Back Squat' | 'Bench Press' | 'Conventional Deadlift'
- *   (or any exercise name in the exercises table)
+ * One of: 'Back Squat' | 'Bench Press' | 'Conventional Deadlift'
+ * (or any exercise name in the exercises table)
  *
  * @returns {{
- *   data: Array<{
- *     rank:            number,
- *     user_id:         string,   // uuid
- *     display_name:    string,
- *     best_e1rm_kg:    number,
- *     best_weight_kg:  number,
- *     total_sets:      number,
- *   }>,
- *   error: Error | null
+ * data: Array<{
+ * rank:            number,
+ * user_id:         string,   // uuid
+ * display_name:    string,
+ * best_e1rm_kg:    number,
+ * best_weight_kg:  number,
+ * total_sets:      number,
+ * }>,
+ * error: Error | null
  * }}
  *
  * Usage:
- *   const { data, error } = await fetchLeaderboardData('Bench Press');
+ * const { data, error } = await fetchLeaderboardData('Bench Press');
  */
 export async function fetchLeaderboardData(exerciseName) {
     const { data, error } = await supabase.rpc("get_global_leaderboard", {
@@ -492,9 +410,9 @@ export async function fetchLeaderboardData(exerciseName) {
 
     return { data: rows, error: null };
 }
+
 // ─────────────────────────────────────────────────────────────
 //  Dynamic Exercise Library helpers
-//  Append these to the bottom of src/lib/supabase.js
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -506,7 +424,7 @@ export async function fetchLeaderboardData(exerciseName) {
  * server-side, so a simple select(*) is all we need here.
  *
  * Returns rows shaped as:
- *   { id, name, category, tags, user_id }
+ * { id, name, category, tags, user_id }
  * where user_id === null means it's a global/seeded exercise.
  *
  * @returns {{ data: Array<Exercise>, error: Error | null }}
@@ -545,21 +463,10 @@ export async function addCustomExercise(name, category, tags = ["custom"]) {
         .select("id, name, category, tags, user_id")
         .single();
 }
+
 // ─────────────────────────────────────────────────────────────────
 //  STR/VOL  —  Itemized nutrition Supabase helpers
-//  Replace / merge these into src/lib/supabase.js
 // ─────────────────────────────────────────────────────────────────
-//  These helpers replace the old saveDailyNutrition that accepted
-//  bare macro totals.  The new approach:
-//    • Each day's record stores a JSONB `entries` array.
-//    • Macro totals (calories, protein_g, carbs_g, fats_g) are
-//      always computed from that array and written in the same
-//      upsert — they are derived columns, never set directly.
-//    • fetchNutritionHistory and deleteNutritionEntry are unchanged
-//      but included here for completeness.
-// ─────────────────────────────────────────────────────────────────
-
-import { supabase } from "./supabaseClient"; // adjust path if needed
 
 // ── computeTotals ────────────────────────────────────────────────
 //  Given an array of food-item objects, return the rolled-up macro
