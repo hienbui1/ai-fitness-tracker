@@ -492,3 +492,56 @@ export async function fetchLeaderboardData(exerciseName) {
 
     return { data: rows, error: null };
 }
+// ─────────────────────────────────────────────────────────────
+//  Dynamic Exercise Library helpers
+//  Append these to the bottom of src/lib/supabase.js
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the combined exercise library for the current user:
+ * all global exercises (user_id IS NULL) plus all exercises
+ * the user has created themselves.
+ *
+ * The RLS policy on the exercises table enforces this filter
+ * server-side, so a simple select(*) is all we need here.
+ *
+ * Returns rows shaped as:
+ *   { id, name, category, tags, user_id }
+ * where user_id === null means it's a global/seeded exercise.
+ *
+ * @returns {{ data: Array<Exercise>, error: Error | null }}
+ */
+export async function fetchExerciseLibrary() {
+    return supabase
+        .from("exercises")
+        .select("id, name, category, tags, user_id")
+        .order("name", { ascending: true });
+}
+
+/**
+ * Insert a new custom exercise owned by the current user.
+ *
+ * The RLS INSERT policy enforces that user_id must equal
+ * auth.uid(), so we set it explicitly here.
+ *
+ * @param {string} name      Display name, e.g. "Zercher Squat"
+ * @param {string} category  One of: Legs | Posterior | Push | Pull | Core
+ * @param {string[]} [tags]  Optional tag array, defaults to ["custom"]
+ *
+ * @returns {{ data: Exercise | null, error: Error | null }}
+ */
+export async function addCustomExercise(name, category, tags = ["custom"]) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { data: null, error: new Error("Not authenticated") };
+
+    return supabase
+        .from("exercises")
+        .insert({
+            user_id:  user.id,
+            name:     name.trim(),
+            category,
+            tags,
+        })
+        .select("id, name, category, tags, user_id")
+        .single();
+}

@@ -4,11 +4,13 @@
  * All localStorage reads/writes have been removed.
  * Data flows through the helpers in src/lib/supabase.js:
  *
- *   On mount  → fetchSessionHistory(), fetchTemplates(), fetchUserPRs()
- *   Save      → saveSession()  (from supabaseClient.js)
+ *   On mount  → fetchSessionHistory(), fetchTemplates(), fetchUserPRs(),
+ *               fetchExerciseLibrary()
+ *   Save      → saveSession()
  *   Templates → saveTemplate(), deleteTemplate(), fetchTemplates()
  *   Chart     → fetchE1rmHistory(), fetchLoggedExercises()
  *   PRs       → fetchUserPRs()  (calls get_user_prs() RPC)
+ *   Library   → fetchExerciseLibrary(), addCustomExercise()
  *
  * Rest-timer duration is the only value still kept in component
  * state (not persisted — trivial to re-enter).
@@ -16,70 +18,27 @@
  * Props:
  *   user                  — Supabase User object from App.jsx
  *   onSignOut             — async fn that calls supabase.auth.signOut()
- *   coachComponent        — <AICoach user={user} /> passed in from App.jsx;
- *                           rendered when the "coach" tab is active
- *   nutritionComponent    — <NutritionTracker user={user} /> passed in from
- *                           App.jsx; rendered when the "nutrition" tab is active
- *   analyticsComponent    — <AnalyticsDashboard user={user} /> passed in from
- *                           App.jsx; rendered when the "analytics" tab is active
- *   leaderboardComponent  — <Leaderboard user={user} /> passed in from
- *                           App.jsx; rendered when the "leaderboard" tab is active
+ *   coachComponent        — <AICoach user={user} /> passed in from App.jsx
+ *   nutritionComponent    — <NutritionTracker user={user} /> passed in from App.jsx
+ *   analyticsComponent    — <AnalyticsDashboard user={user} /> passed in from App.jsx
+ *   leaderboardComponent  — <Leaderboard user={user} /> passed in from App.jsx
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-    saveSession      as dbSaveSession,
+    saveSession         as dbSaveSession,
     fetchSessionHistory,
-    saveTemplate     as dbSaveTemplate,
-    deleteTemplate   as dbDeleteTemplate,
-    fetchTemplates   as dbFetchTemplates,
+    saveTemplate        as dbSaveTemplate,
+    deleteTemplate      as dbDeleteTemplate,
+    fetchTemplates      as dbFetchTemplates,
     fetchUserPRs,
     fetchE1rmHistory,
     fetchLoggedExercises,
-} from "../lib/supabase"; // adjust path if needed
+    fetchExerciseLibrary,
+    addCustomExercise   as dbAddCustomExercise,
+} from "../lib/supabase";
 
-// ── Exercise library ───────────────────────────────────────────
-const EXERCISE_LIBRARY = [
-    { name: "Back Squat",             category: "Legs",      tags: ["quad","glute","compound"] },
-    { name: "Front Squat",            category: "Legs",      tags: ["quad","compound"] },
-    { name: "Hack Squat",             category: "Legs",      tags: ["quad"] },
-    { name: "Leg Press",              category: "Legs",      tags: ["quad","machine"] },
-    { name: "Bulgarian Split Squat",  category: "Legs",      tags: ["quad","glute","unilateral"] },
-    { name: "Leg Extension",          category: "Legs",      tags: ["quad","machine","isolation"] },
-    { name: "Conventional Deadlift",  category: "Posterior", tags: ["hamstring","glute","compound","back"] },
-    { name: "Sumo Deadlift",          category: "Posterior", tags: ["hamstring","glute","compound"] },
-    { name: "Romanian Deadlift",      category: "Posterior", tags: ["hamstring","glute"] },
-    { name: "Hip Thrust",             category: "Posterior", tags: ["glute"] },
-    { name: "Good Morning",           category: "Posterior", tags: ["hamstring","lower back"] },
-    { name: "Leg Curl",               category: "Posterior", tags: ["hamstring","machine","isolation"] },
-    { name: "Nordic Curl",            category: "Posterior", tags: ["hamstring"] },
-    { name: "Bench Press",            category: "Push",      tags: ["chest","compound"] },
-    { name: "Incline Bench Press",    category: "Push",      tags: ["chest","compound"] },
-    { name: "Close-Grip Bench Press", category: "Push",      tags: ["tricep","chest","compound"] },
-    { name: "Overhead Press",         category: "Push",      tags: ["shoulder","compound"] },
-    { name: "Push Press",             category: "Push",      tags: ["shoulder","compound"] },
-    { name: "Dumbbell Shoulder Press",category: "Push",      tags: ["shoulder"] },
-    { name: "Lateral Raise",          category: "Push",      tags: ["shoulder","isolation"] },
-    { name: "Tricep Pushdown",        category: "Push",      tags: ["tricep","isolation"] },
-    { name: "Skull Crusher",          category: "Push",      tags: ["tricep","isolation"] },
-    { name: "Dips",                   category: "Push",      tags: ["tricep","chest","compound"] },
-    { name: "Barbell Row",            category: "Pull",      tags: ["back","compound"] },
-    { name: "Pendlay Row",            category: "Pull",      tags: ["back","compound"] },
-    { name: "Dumbbell Row",           category: "Pull",      tags: ["back"] },
-    { name: "Pull-Up",                category: "Pull",      tags: ["back","bicep","compound","bodyweight"] },
-    { name: "Chin-Up",                category: "Pull",      tags: ["back","bicep","compound","bodyweight"] },
-    { name: "Lat Pulldown",           category: "Pull",      tags: ["back","machine"] },
-    { name: "Cable Row",              category: "Pull",      tags: ["back","cable"] },
-    { name: "Face Pull",              category: "Pull",      tags: ["rear delt","cable"] },
-    { name: "Barbell Curl",           category: "Pull",      tags: ["bicep","isolation"] },
-    { name: "Dumbbell Curl",          category: "Pull",      tags: ["bicep","isolation"] },
-    { name: "Hammer Curl",            category: "Pull",      tags: ["bicep","isolation"] },
-    { name: "Ab Wheel Rollout",       category: "Core",      tags: ["core","bodyweight"] },
-    { name: "Cable Crunch",           category: "Core",      tags: ["core","cable"] },
-    { name: "Plank",                  category: "Core",      tags: ["core","bodyweight"] },
-    { name: "Farmers Carry",          category: "Core",      tags: ["core","grip","compound"] },
-];
-
+// ── Category colours (static — not exercise data) ──────────────
 const CATEGORY_COLORS = {
     Legs:      { dot: "#a78bfa", text: "text-violet-400",  border: "border-violet-800",  bg: "bg-violet-950"  },
     Posterior: { dot: "#fb923c", text: "text-orange-400",  border: "border-orange-800",  bg: "bg-orange-950"  },
@@ -88,7 +47,7 @@ const CATEGORY_COLORS = {
     Core:      { dot: "#f472b6", text: "text-pink-400",    border: "border-pink-800",    bg: "bg-pink-950"    },
 };
 
-const RPE_LABELS = { 6:"Very Easy", 7:"Moderate", 7.5:"Hard-ish", 8:"Hard", 8.5:"Very Hard", 9:"Near Max", 9.5:"1-2 left", 10:"Max" };
+const RPE_LABELS  = { 6:"Very Easy", 7:"Moderate", 7.5:"Hard-ish", 8:"Hard", 8.5:"Very Hard", 9:"Near Max", 9.5:"1-2 left", 10:"Max" };
 const DEFAULT_REST = 180;
 
 // ── Pure helpers ───────────────────────────────────────────────
@@ -109,7 +68,6 @@ function Spinner({ size = 16, className = "" }) {
     );
 }
 
-// Full-page loading state shown while initial data is fetching
 function PageLoader({ label = "Loading…" }) {
     return (
         <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-4"
@@ -126,30 +84,45 @@ function PageLoader({ label = "Loading…" }) {
 }
 
 // ── ExercisePickerModal ────────────────────────────────────────
-function ExercisePickerModal({ onSelect, onClose, alreadyAdded = [] }) {
+function ExercisePickerModal({ onSelect, onClose, onCreateAndSelect, alreadyAdded = [], exerciseLibrary = [] }) {
     const [query, setQuery]                   = useState("");
     const [activeCategory, setActiveCategory] = useState("All");
     const [highlighted, setHighlighted]       = useState(0);
-    const inputRef = useRef(null);
-    const listRef  = useRef(null);
+    const [createMode, setCreateMode]         = useState(false);
+    const [newName, setNewName]               = useState("");
+    const [newCategory, setNewCategory]       = useState("Push");
+    const [creating, setCreating]             = useState(false);
+    const [createError, setCreateError]       = useState("");
+    const inputRef   = useRef(null);
+    const newNameRef = useRef(null);
+    const listRef    = useRef(null);
 
     useEffect(() => { inputRef.current?.focus(); }, []);
     useEffect(() => {
-        const h = (e) => { if (e.key === "Escape") onClose(); };
+        if (createMode) setTimeout(() => newNameRef.current?.focus(), 50);
+    }, [createMode]);
+    useEffect(() => {
+        const h = (e) => {
+            if (e.key === "Escape") { if (createMode) setCreateMode(false); else onClose(); }
+        };
         window.addEventListener("keydown", h);
         return () => window.removeEventListener("keydown", h);
-    }, [onClose]);
+    }, [onClose, createMode]);
 
     const categories = ["All", ...Object.keys(CATEGORY_COLORS)];
-    const filtered   = EXERCISE_LIBRARY.filter(ex => {
+
+    const filtered = exerciseLibrary.filter(ex => {
         const matchCat = activeCategory === "All" || ex.category === activeCategory;
         const q        = query.toLowerCase().trim();
-        const matchQ   = !q || ex.name.toLowerCase().includes(q) || ex.tags.some(t => t.includes(q));
+        const matchQ   = !q || ex.name.toLowerCase().includes(q)
+            || (ex.tags ?? []).some(t => t.includes(q));
         return matchCat && matchQ;
     });
 
     useEffect(() => { setHighlighted(0); }, [query, activeCategory]);
+
     useEffect(() => {
+        if (createMode) return;
         const h = (e) => {
             if (e.key === "ArrowDown") { e.preventDefault(); setHighlighted(i => Math.min(i+1, filtered.length-1)); }
             if (e.key === "ArrowUp")   { e.preventDefault(); setHighlighted(i => Math.max(i-1, 0)); }
@@ -157,12 +130,36 @@ function ExercisePickerModal({ onSelect, onClose, alreadyAdded = [] }) {
         };
         window.addEventListener("keydown", h);
         return () => window.removeEventListener("keydown", h);
-    }, [filtered, highlighted, onSelect]);
-    useEffect(() => { listRef.current?.children[highlighted]?.scrollIntoView({ block:"nearest" }); }, [highlighted]);
+    }, [filtered, highlighted, onSelect, createMode]);
+
+    useEffect(() => {
+        listRef.current?.children[highlighted]?.scrollIntoView({ block: "nearest" });
+    }, [highlighted]);
 
     const grouped = activeCategory === "All" && !query.trim()
-        ? Object.keys(CATEGORY_COLORS).reduce((acc, cat) => { acc[cat] = EXERCISE_LIBRARY.filter(e => e.category === cat); return acc; }, {})
+        ? Object.keys(CATEGORY_COLORS).reduce((acc, cat) => {
+            acc[cat] = exerciseLibrary.filter(e => e.category === cat);
+            return acc;
+        }, {})
         : null;
+
+    const handleCreate = async () => {
+        const trimmed = newName.trim();
+        if (!trimmed) { setCreateError("Name is required."); return; }
+        if (exerciseLibrary.some(e => e.name.toLowerCase() === trimmed.toLowerCase())) {
+            setCreateError("An exercise with that name already exists."); return;
+        }
+        setCreating(true);
+        setCreateError("");
+        const { data, error } = await onCreateAndSelect(trimmed, newCategory);
+        if (error) {
+            setCreateError(error.message ?? "Save failed.");
+            setCreating(false);
+            return;
+        }
+        setCreating(false);
+        setCreateMode(false);
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
@@ -181,25 +178,63 @@ function ExercisePickerModal({ onSelect, onClose, alreadyAdded = [] }) {
                     <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-xs tracking-widest border border-zinc-700 rounded px-2 py-1 transition-colors">ESC</button>
                 </div>
 
-                <div className="flex gap-1.5 px-4 py-2.5 border-b border-zinc-800 overflow-x-auto">
+                <div className="flex gap-1.5 px-4 py-2.5 border-b border-zinc-800 overflow-x-auto no-scrollbar">
                     {categories.map(cat => {
                         const color  = CATEGORY_COLORS[cat];
                         const active = activeCategory === cat;
                         return (
                             <button key={cat} onClick={() => setActiveCategory(cat)}
                                     className={`shrink-0 text-xs px-3 py-1 rounded-full border transition-colors font-bold tracking-wide
-                  ${active ? cat === "All" ? "bg-amber-500 border-amber-500 text-zinc-900" : `${color.bg} ${color.border} ${color.text}` : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
+                  ${active
+                                        ? cat === "All"
+                                            ? "bg-amber-500 border-amber-500 text-zinc-900"
+                                            : `${color.bg} ${color.border} ${color.text}`
+                                        : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
                                 {cat}
                             </button>
                         );
                     })}
                 </div>
 
+                {createMode && (
+                    <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-4 flex flex-col gap-3">
+                        <div className="flex items-center justify-between mb-1">
+                            <span className="text-amber-400 text-xs font-bold tracking-widest">NEW CUSTOM EXERCISE</span>
+                            <button onClick={() => { setCreateMode(false); setCreateError(""); }}
+                                    className="text-zinc-600 hover:text-zinc-300 text-lg leading-none transition-colors">×</button>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-zinc-600 text-xs tracking-widest">NAME</label>
+                            <input ref={newNameRef} value={newName}
+                                   onChange={e => { setNewName(e.target.value); setCreateError(""); }}
+                                   onKeyDown={e => e.key === "Enter" && !creating && handleCreate()}
+                                   placeholder="e.g. Zercher Squat" maxLength={60}
+                                   className="bg-zinc-800 border border-zinc-700 focus:border-amber-500 rounded-lg px-3 py-2 text-zinc-100 text-sm outline-none transition-colors placeholder-zinc-600" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-zinc-600 text-xs tracking-widest">CATEGORY</label>
+                            <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
+                                    className="bg-zinc-800 border border-zinc-700 focus:border-amber-500 rounded-lg px-3 py-2 text-zinc-100 text-sm outline-none transition-colors appearance-none">
+                                {Object.keys(CATEGORY_COLORS).map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                            </select>
+                        </div>
+                        {createError && <p className="text-red-400 text-xs">{createError}</p>}
+                        <button onClick={handleCreate} disabled={creating || !newName.trim()}
+                                className={`w-full py-2.5 text-sm font-bold rounded-lg transition-colors tracking-widest flex items-center justify-center gap-2
+                ${creating || !newName.trim() ? "bg-zinc-800 text-zinc-600 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-400 text-zinc-900"}`}>
+                            {creating ? <><Spinner size={13} className="text-zinc-900" /> SAVING…</> : "CREATE + ADD TO SESSION"}
+                        </button>
+                    </div>
+                )}
+
                 <div className="overflow-y-auto flex-1">
-                    {filtered.length === 0 && (
+                    {filtered.length === 0 && !createMode && (
                         <div className="text-center py-12 text-zinc-600 text-sm">No exercises match "{query}"</div>
                     )}
                     {grouped && Object.entries(grouped).map(([cat, exs]) => {
+                        if (exs.length === 0) return null;
                         const color = CATEGORY_COLORS[cat];
                         return (
                             <div key={cat}>
@@ -210,7 +245,12 @@ function ExercisePickerModal({ onSelect, onClose, alreadyAdded = [] }) {
                                 {exs.map(ex => {
                                     const flatIdx = filtered.indexOf(ex);
                                     const isAdded = alreadyAdded.includes(ex.name);
-                                    return <ExerciseRow key={ex.name} ex={ex} isHighlighted={flatIdx === highlighted} isAdded={isAdded} color={color} onMouseEnter={() => setHighlighted(flatIdx)} onClick={() => !isAdded && onSelect(ex.name)} />;
+                                    return (
+                                        <ExerciseRow key={ex.name} ex={ex}
+                                                     isHighlighted={flatIdx === highlighted} isAdded={isAdded} color={color}
+                                                     onMouseEnter={() => setHighlighted(flatIdx)}
+                                                     onClick={() => !isAdded && onSelect(ex.name)} />
+                                    );
                                 })}
                             </div>
                         );
@@ -218,17 +258,32 @@ function ExercisePickerModal({ onSelect, onClose, alreadyAdded = [] }) {
                     {!grouped && (
                         <div ref={listRef}>
                             {filtered.map((ex, i) => {
-                                const color   = CATEGORY_COLORS[ex.category];
+                                const color   = CATEGORY_COLORS[ex.category] ?? { dot:"#71717a", text:"text-zinc-400" };
                                 const isAdded = alreadyAdded.includes(ex.name);
-                                return <ExerciseRow key={ex.name} ex={ex} isHighlighted={i === highlighted} isAdded={isAdded} color={color} query={query} onMouseEnter={() => setHighlighted(i)} onClick={() => !isAdded && onSelect(ex.name)} />;
+                                return (
+                                    <ExerciseRow key={ex.name} ex={ex}
+                                                 isHighlighted={i === highlighted} isAdded={isAdded} color={color} query={query}
+                                                 onMouseEnter={() => setHighlighted(i)}
+                                                 onClick={() => !isAdded && onSelect(ex.name)} />
+                                );
                             })}
                         </div>
                     )}
                 </div>
 
-                <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-950 flex items-center justify-between">
+                <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-950 flex items-center justify-between gap-3">
                     <span className="text-zinc-700 text-xs">{filtered.length} exercise{filtered.length !== 1 ? "s" : ""}</span>
-                    <span className="text-zinc-700 text-xs">↑↓ navigate · Enter to add</span>
+                    {!createMode && (
+                        <button
+                            onClick={() => { setCreateMode(true); setNewName(query); setNewCategory("Push"); setCreateError(""); }}
+                            className="flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 hover:border-amber-500/60 bg-amber-500/5 hover:bg-amber-500/10 rounded px-2.5 py-1 transition-colors font-bold tracking-wide">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            CREATE CUSTOM
+                        </button>
+                    )}
+                    {!createMode && <span className="text-zinc-700 text-xs">↑↓ navigate · Enter to add</span>}
                 </div>
             </div>
         </div>
@@ -239,16 +294,27 @@ function HighlightMatch({ text, query }) {
     if (!query) return <span>{text}</span>;
     const idx = text.toLowerCase().indexOf(query.toLowerCase());
     if (idx === -1) return <span>{text}</span>;
-    return <span>{text.slice(0,idx)}<span className="text-amber-400 font-bold">{text.slice(idx, idx+query.length)}</span>{text.slice(idx+query.length)}</span>;
+    return (
+        <span>
+      {text.slice(0, idx)}
+            <span className="text-amber-400 font-bold">{text.slice(idx, idx + query.length)}</span>
+            {text.slice(idx + query.length)}
+    </span>
+    );
 }
 
 function ExerciseRow({ ex, isHighlighted, isAdded, color, query, onMouseEnter, onClick }) {
     return (
         <button onMouseEnter={onMouseEnter} onClick={onClick} disabled={isAdded}
-                className={`w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors ${isHighlighted ? "bg-zinc-800" : "hover:bg-zinc-800/50"} ${isAdded ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+                className={`w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors
+        ${isHighlighted ? "bg-zinc-800" : "hover:bg-zinc-800/50"}
+        ${isAdded ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
             <div className="flex items-center gap-3">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color.dot }} />
                 <span className="text-sm text-zinc-200"><HighlightMatch text={ex.name} query={query} /></span>
+                {ex.user_id && (
+                    <span className="text-xs text-amber-500/60 border border-amber-500/20 rounded px-1 leading-tight">custom</span>
+                )}
             </div>
             <div className="flex items-center gap-2">
                 <span className={`text-xs ${color.text} opacity-60`}>{ex.category}</span>
@@ -277,6 +343,7 @@ function SaveTemplateModal({ blocks, onSave, onClose, saving }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ fontFamily:"'IBM Plex Mono',monospace" }}>
             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => !saving && onClose()} />
             <div className="relative w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+
                 <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950">
                     <div>
                         <div className="text-amber-400 font-bold text-sm tracking-wide">SAVE AS TEMPLATE</div>
@@ -310,7 +377,8 @@ function SaveTemplateModal({ blocks, onSave, onClose, saving }) {
                     <div className="flex flex-wrap gap-1.5">
                         {suggestions.map(s => (
                             <button key={s} onClick={() => setName(s)}
-                                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${name === s ? "bg-amber-500 border-amber-500 text-zinc-900 font-bold" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500"}`}>
+                                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors
+                  ${name === s ? "bg-amber-500 border-amber-500 text-zinc-900 font-bold" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500"}`}>
                                 {s}
                             </button>
                         ))}
@@ -334,12 +402,18 @@ function SaveTemplateModal({ blocks, onSave, onClose, saving }) {
 }
 
 // ── LoadTemplatePanel ──────────────────────────────────────────
-function LoadTemplatePanel({ templates, onLoad, onDelete, onClose, loadingId, deletingId }) {
+function LoadTemplatePanel({ templates, exerciseLibrary, onLoad, onDelete, onClose, loadingId, deletingId }) {
     useEffect(() => {
         const h = (e) => { if (e.key === "Escape") onClose(); };
         window.addEventListener("keydown", h);
         return () => window.removeEventListener("keydown", h);
     }, [onClose]);
+
+    const getCategoryColor = (exName, storedCategory) => {
+        const meta = (exerciseLibrary ?? []).find(e => e.name === exName);
+        const cat  = meta?.category ?? storedCategory ?? "Other";
+        return CATEGORY_COLORS[cat] ?? { dot:"#71717a" };
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ fontFamily:"'IBM Plex Mono',monospace" }}>
@@ -360,10 +434,10 @@ function LoadTemplatePanel({ templates, onLoad, onDelete, onClose, loadingId, de
                     )}
                     {templates.map(tpl => {
                         const cats = [...new Set((tpl.exercises || []).map(ex => {
-                            const meta = EXERCISE_LIBRARY.find(e => e.name === ex.name);
-                            return meta?.category ?? "Other";
+                            const meta = (exerciseLibrary ?? []).find(e => e.name === ex.name);
+                            return meta?.category ?? ex.category ?? "Other";
                         }))];
-                        const isLoading  = loadingId === tpl.id;
+                        const isLoading  = loadingId  === tpl.id;
                         const isDeleting = deletingId === tpl.id;
                         return (
                             <div key={tpl.id} className="bg-zinc-800 border border-zinc-700 hover:border-zinc-600 rounded-lg p-3.5 transition-colors">
@@ -385,8 +459,7 @@ function LoadTemplatePanel({ templates, onLoad, onDelete, onClose, loadingId, de
                                 </div>
                                 <div className="flex flex-wrap gap-1 mb-3">
                                     {(tpl.exercises || []).map(ex => {
-                                        const meta  = EXERCISE_LIBRARY.find(e => e.name === ex.name);
-                                        const color = CATEGORY_COLORS[meta?.category] ?? { dot:"#71717a" };
+                                        const color = getCategoryColor(ex.name, ex.category);
                                         return (
                                             <span key={ex.name} className="flex items-center gap-1 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-0.5 text-zinc-400">
                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color.dot }} />
@@ -455,7 +528,6 @@ function ReadinessModule({ readiness, onChange }) {
                     </svg>
                 </div>
             </button>
-
             {open && (
                 <div className="border-t border-zinc-800 px-4 py-3 grid grid-cols-3 gap-3">
                     <div className="flex flex-col gap-1">
@@ -470,7 +542,6 @@ function ReadinessModule({ readiness, onChange }) {
                             </button>
                         </div>
                     </div>
-
                     <div className="flex flex-col gap-1">
                         <label className="text-zinc-600 text-xs tracking-widest">SLEEP (HRS)</label>
                         <div className="relative">
@@ -486,7 +557,6 @@ function ReadinessModule({ readiness, onChange }) {
                             )}
                         </div>
                     </div>
-
                     <div className="flex flex-col gap-1">
                         <label className="text-zinc-600 text-xs tracking-widest">HIT MACROS?</label>
                         <div className="flex gap-1 h-[34px]">
@@ -506,7 +576,7 @@ function ReadinessModule({ readiness, onChange }) {
     );
 }
 
-// ── RestTimer (duration in component state only — not persisted) ─
+// ── RestTimer ──────────────────────────────────────────────────
 function RestTimer({ onComplete }) {
     const [restDuration, setRestDuration] = useState(DEFAULT_REST);
     const [timeLeft, setTimeLeft]         = useState(null);
@@ -517,7 +587,7 @@ function RestTimer({ onComplete }) {
 
     useEffect(() => {
         if (running && timeLeft > 0) {
-            intervalRef.current = setInterval(() => setTimeLeft(t => t-1), 1000);
+            intervalRef.current = setInterval(() => setTimeLeft(t => t - 1), 1000);
         } else if (running && timeLeft === 0) {
             setRunning(false); onComplete?.();
         }
@@ -596,7 +666,8 @@ function SetRow({ set, index, onChange, onDelete, historicalPR }) {
             <div className="flex flex-col">
                 <label className="text-zinc-600 text-xs mb-0.5">KG</label>
                 <input type="number" min="0" step="2.5" value={set.weight} onChange={e => onChange({ ...set, weight: +e.target.value })}
-                       className={`bg-zinc-800 border rounded px-2 py-1 text-sm w-full outline-none transition-colors ${isWeightPR ? "border-amber-400 text-amber-300" : "border-zinc-700 focus:border-amber-500 text-amber-300"}`} />
+                       className={`bg-zinc-800 border rounded px-2 py-1 text-sm w-full outline-none transition-colors
+            ${isWeightPR ? "border-amber-400 text-amber-300" : "border-zinc-700 focus:border-amber-500 text-amber-300"}`} />
             </div>
             <div className="flex flex-col">
                 <label className="text-zinc-600 text-xs mb-0.5">RPE</label>
@@ -658,8 +729,8 @@ function ExerciseBlock({ block, onChange, onDelete, historicalPRs }) {
                 </div>
             </div>
             <div className="px-4">
-                {block.sets.map((s,i) => (
-                    <SetRow key={s.id} set={s} index={i} onChange={s => updateSet(i,s)} onDelete={() => deleteSet(i)} historicalPR={pr} />
+                {block.sets.map((s, i) => (
+                    <SetRow key={s.id} set={s} index={i} onChange={s => updateSet(i, s)} onDelete={() => deleteSet(i)} historicalPR={pr} />
                 ))}
             </div>
             <div className="px-4 py-3">
@@ -672,8 +743,8 @@ function ExerciseBlock({ block, onChange, onDelete, historicalPRs }) {
     );
 }
 
-// ── ProgressChart (Supabase-powered) ──────────────────────────
-function ProgressChart() {
+// ── ProgressChart ──────────────────────────────────────────────
+function ProgressChart({ exerciseLibrary }) {
     const containerRef = useRef(null);
     const [width, setWidth]           = useState(600);
     const [chartEx, setChartEx]       = useState("");
@@ -684,7 +755,6 @@ function ProgressChart() {
     const [loadingList, setLoadingList]   = useState(true);
     const [loadingChart, setLoadingChart] = useState(false);
 
-    // Responsive width
     useEffect(() => {
         if (!containerRef.current) return;
         const ro = new ResizeObserver(entries => setWidth(entries[0].contentRect.width || 600));
@@ -692,13 +762,11 @@ function ProgressChart() {
         return () => ro.disconnect();
     }, []);
 
-    // Fetch exercise list from Supabase
     useEffect(() => {
         setLoadingList(true);
         fetchLoggedExercises().then(({ data, error }) => {
             if (!error && data) {
-                // de-duplicate (e1rm_history may return one row per date per exercise)
-                const seen = new Set();
+                const seen   = new Set();
                 const unique = data.filter(r => { if (seen.has(r.exercise_name)) return false; seen.add(r.exercise_name); return true; });
                 setExerciseList(unique);
                 if (unique.length > 0 && !chartEx) setChartEx(unique[0].exercise_name);
@@ -707,39 +775,33 @@ function ProgressChart() {
         });
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Fetch e1RM history whenever selected exercise changes
     useEffect(() => {
         if (!chartEx) return;
         setLoadingChart(true);
         setTooltip(null);
         fetchE1rmHistory(chartEx).then(({ data, error }) => {
             if (!error && data) {
-                setChartData(data.map(r => ({
-                    date:  new Date(r.session_date),
-                    value: Number(r.best_e1rm_kg),
-                    label: r.session_name,
-                })));
+                setChartData(data.map(r => ({ date: new Date(r.session_date), value: Number(r.best_e1rm_kg), label: r.session_name })));
             }
             setLoadingChart(false);
         });
     }, [chartEx]);
 
-    // Chart geometry
-    const H          = 200;
-    const PAD        = { top:16, right:20, bottom:40, left:48 };
-    const innerW     = Math.max(width - PAD.left - PAD.right, 20);
-    const innerH     = H - PAD.top - PAD.bottom;
-    const minVal     = chartData.length > 0 ? Math.min(...chartData.map(d => d.value)) : 0;
-    const maxVal     = chartData.length > 0 ? Math.max(...chartData.map(d => d.value)) : 100;
-    const valRange   = maxVal - minVal || 1;
-    const padVal     = valRange * 0.15;
-    const yMin       = Math.max(0, minVal - padVal);
-    const yMax       = maxVal + padVal;
-    const toX        = (i) => chartData.length < 2 ? PAD.left + innerW/2 : PAD.left + (i/(chartData.length-1)) * innerW;
-    const toY        = (v) => PAD.top + innerH - ((v-yMin)/(yMax-yMin)) * innerH;
-    const yTicks     = Array.from({length:5}, (_,i) => yMin + (yMax-yMin)*(i/4));
-    const xTickIdxs  = chartData.length <= 6 ? chartData.map((_,i) => i) : Array.from({length:6}, (_,i) => Math.round(i*(chartData.length-1)/5));
-    const fmtDate    = (d) => d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+    const H      = 200;
+    const PAD    = { top:16, right:20, bottom:40, left:48 };
+    const innerW = Math.max(width - PAD.left - PAD.right, 20);
+    const innerH = H - PAD.top - PAD.bottom;
+    const minVal = chartData.length > 0 ? Math.min(...chartData.map(d => d.value)) : 0;
+    const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => d.value)) : 100;
+    const valRange  = maxVal - minVal || 1;
+    const padVal    = valRange * 0.15;
+    const yMin      = Math.max(0, minVal - padVal);
+    const yMax      = maxVal + padVal;
+    const toX       = (i) => chartData.length < 2 ? PAD.left + innerW/2 : PAD.left + (i/(chartData.length-1)) * innerW;
+    const toY       = (v) => PAD.top + innerH - ((v-yMin)/(yMax-yMin)) * innerH;
+    const yTicks    = Array.from({length:5}, (_,i) => yMin + (yMax-yMin)*(i/4));
+    const xTickIdxs = chartData.length <= 6 ? chartData.map((_,i) => i) : Array.from({length:6}, (_,i) => Math.round(i*(chartData.length-1)/5));
+    const fmtDate   = (d) => d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
     const linePoints = chartData.map((d,i) => `${toX(i)},${toY(d.value)}`).join(" ");
     const areaPath   = chartData.length > 1
         ? `M${toX(0)},${PAD.top+innerH} ${chartData.map((d,i) => `L${toX(i)},${toY(d.value)}`).join(" ")} L${toX(chartData.length-1)},${PAD.top+innerH} Z`
@@ -749,18 +811,16 @@ function ProgressChart() {
         if (!chartData.length) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left - PAD.left) / innerW));
-        const idx  = Math.round(pct * (chartData.length-1));
+        const idx  = Math.round(pct * (chartData.length - 1));
         const d    = chartData[idx];
         if (d) setTooltip({ x: toX(idx), y: toY(d.value), date: fmtDate(d.date), value: d.value, label: d.label });
     };
 
-    const meta  = EXERCISE_LIBRARY.find(e => e.name === chartEx);
+    const meta  = (exerciseLibrary ?? []).find(e => e.name === chartEx);
     const color = CATEGORY_COLORS[meta?.category] ?? { dot:"#f59e0b", text:"text-amber-400" };
 
     return (
         <div ref={containerRef} className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden" style={{ fontFamily:"'IBM Plex Mono',monospace" }}>
-
-            {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
                 <div>
                     <div className="text-zinc-400 text-xs tracking-widest uppercase">e1RM Progress</div>
@@ -772,8 +832,6 @@ function ProgressChart() {
                         </div>
                     )}
                 </div>
-
-                {/* Exercise dropdown */}
                 <div className="relative">
                     <button onClick={() => setDropdown(o => !o)}
                             className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-lg px-3 py-1.5 text-xs transition-colors max-w-[180px]">
@@ -788,19 +846,19 @@ function ProgressChart() {
                             <polyline points="6 9 12 15 18 9"/>
                         </svg>
                     </button>
-
                     {dropdownOpen && (
                         <div className="absolute right-0 top-full mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl z-30 overflow-hidden" style={{ maxHeight:"240px", overflowY:"auto" }}>
                             {exerciseList.length === 0 && (
                                 <div className="px-3 py-4 text-zinc-600 text-xs text-center">No sessions logged yet</div>
                             )}
                             {exerciseList.map(ex => {
-                                const m  = EXERCISE_LIBRARY.find(e => e.name === ex.exercise_name);
-                                const c  = CATEGORY_COLORS[m?.category] ?? { dot:"#71717a" };
+                                const m = (exerciseLibrary ?? []).find(e => e.name === ex.exercise_name);
+                                const c = CATEGORY_COLORS[m?.category] ?? { dot:"#71717a" };
                                 return (
                                     <button key={ex.exercise_name}
                                             onClick={() => { setChartEx(ex.exercise_name); setDropdown(false); }}
-                                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${chartEx === ex.exercise_name ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"}`}>
+                                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors
+                      ${chartEx === ex.exercise_name ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"}`}>
                                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: c.dot }} />
                                         {ex.exercise_name}
                                     </button>
@@ -811,7 +869,6 @@ function ProgressChart() {
                 </div>
             </div>
 
-            {/* SVG chart area */}
             <div className="relative" onMouseLeave={() => setTooltip(null)}>
                 <svg width={width} height={H} onMouseMove={handleMouseMove} style={{ display:"block", cursor:"crosshair" }}>
                     <defs>
@@ -824,8 +881,7 @@ function ProgressChart() {
                             <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
                         </filter>
                     </defs>
-
-                    {yTicks.map((v,i) => (
+                    {yTicks.map((v, i) => (
                         <g key={i}>
                             <line x1={PAD.left} y1={toY(v)} x2={PAD.left+innerW} y2={toY(v)} stroke="#27272a" strokeWidth="1" strokeDasharray="4 4" />
                             <text x={PAD.left-6} y={toY(v)+4} textAnchor="end" fill="#52525b" fontSize="9" fontFamily="'IBM Plex Mono',monospace">{Math.round(v)}</text>
@@ -837,27 +893,20 @@ function ProgressChart() {
                         if (!d) return null;
                         return <text key={idx} x={toX(idx)} y={H-8} textAnchor="middle" fill="#52525b" fontSize="9" fontFamily="'IBM Plex Mono',monospace">{fmtDate(d.date)}</text>;
                     })}
-
-                    {/* Loading overlay */}
                     {loadingChart && (
                         <text x={PAD.left+innerW/2} y={PAD.top+innerH/2} textAnchor="middle" fill="#52525b" fontSize="11" fontFamily="'IBM Plex Mono',monospace">Loading…</text>
                     )}
-
-                    {/* No data state */}
                     {!loadingChart && chartData.length === 0 && (
                         <text x={PAD.left+innerW/2} y={PAD.top+innerH/2} textAnchor="middle" fill="#3f3f46" fontSize="12" fontFamily="'IBM Plex Mono',monospace">No data for {chartEx || "this exercise"}</text>
                     )}
-
                     {chartData.length > 1 && !loadingChart && (
                         <>
                             <path d={areaPath} fill="url(#chartAreaGrad)" />
                             <polyline points={linePoints} fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
                         </>
                     )}
-
                     {tooltip && <line x1={tooltip.x} y1={PAD.top} x2={tooltip.x} y2={PAD.top+innerH} stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.3" strokeDasharray="3 3" />}
-
-                    {!loadingChart && chartData.map((d,i) => {
+                    {!loadingChart && chartData.map((d, i) => {
                         const cx = toX(i); const cy = toY(d.value);
                         const isHovered = tooltip && Math.abs(tooltip.x - cx) < 2;
                         return (
@@ -867,7 +916,6 @@ function ProgressChart() {
                         );
                     })}
                 </svg>
-
                 {tooltip && (
                     <div className="absolute pointer-events-none bg-zinc-950 border border-amber-500/40 rounded-lg px-3 py-2 shadow-xl"
                          style={{ left: Math.min(tooltip.x+12, width-140), top: Math.max(tooltip.y-48, PAD.top), fontFamily:"'IBM Plex Mono',monospace" }}>
@@ -877,7 +925,6 @@ function ProgressChart() {
                     </div>
                 )}
             </div>
-
             {dropdownOpen && <div className="fixed inset-0 z-20" onClick={() => setDropdown(false)} />}
         </div>
     );
@@ -885,7 +932,6 @@ function ProgressChart() {
 
 // ── Main StrengthTracker ───────────────────────────────────────
 export default function StrengthTracker({ user, onSignOut, coachComponent, nutritionComponent, analyticsComponent, leaderboardComponent }) {
-    // ── Active session state ──────────────────────────────────
     const [blocks, setBlocks]                     = useState([]);
     const [showPicker, setShowPicker]             = useState(false);
     const [showSaveTemplate, setShowSaveTemplate] = useState(false);
@@ -896,31 +942,31 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
     const [view, setView]                         = useState("log");
     const [toast, setToast]                       = useState(null);
 
-    // ── Supabase data ─────────────────────────────────────────
-    const [savedSessions, setSavedSessions] = useState([]);
-    const [templates, setTemplates]         = useState([]);
-    const [historicalPRs, setHistoricalPRs] = useState({});
+    const [savedSessions, setSavedSessions]     = useState([]);
+    const [templates, setTemplates]             = useState([]);
+    const [historicalPRs, setHistoricalPRs]     = useState({});
+    const [exerciseLibrary, setExerciseLibrary] = useState([]);
 
-    // ── Loading states ────────────────────────────────────────
-    const [initLoading, setInitLoading]       = useState(true);   // first load
-    const [savingSession, setSavingSession]   = useState(false);
-    const [savingTemplate, setSavingTemplate] = useState(false);
-    const [templateLoadingId, setTemplateLoadingId] = useState(null);
+    const [initLoading, setInitLoading]               = useState(true);
+    const [savingSession, setSavingSession]           = useState(false);
+    const [savingTemplate, setSavingTemplate]         = useState(false);
+    const [templateLoadingId, setTemplateLoadingId]   = useState(null);
     const [templateDeletingId, setTemplateDeletingId] = useState(null);
 
-    // ── Initial data fetch on mount ───────────────────────────
     useEffect(() => {
         async function bootstrap() {
             setInitLoading(true);
             try {
-                const [historyResult, templatesResult, prsResult] = await Promise.all([
+                const [historyResult, templatesResult, prsResult, libraryResult] = await Promise.all([
                     fetchSessionHistory(30, 0),
                     dbFetchTemplates(),
                     fetchUserPRs(),
+                    fetchExerciseLibrary(),
                 ]);
                 if (historyResult.data)   setSavedSessions(historyResult.data);
                 if (templatesResult.data) setTemplates(templatesResult.data);
                 if (!prsResult.error)     setHistoricalPRs(prsResult.prs);
+                if (libraryResult.data)   setExerciseLibrary(libraryResult.data);
             } catch (err) {
                 console.error("Bootstrap fetch failed:", err);
             } finally {
@@ -930,7 +976,6 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
         bootstrap();
     }, []);
 
-    // ── Helpers ───────────────────────────────────────────────
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
     const refreshPRs = async () => {
@@ -938,14 +983,25 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
         if (!error) setHistoricalPRs(prs);
     };
 
-    // ── Exercise management ───────────────────────────────────
     const addExercise = useCallback((name) => {
-        const meta = EXERCISE_LIBRARY.find(e => e.name === name);
+        const meta = exerciseLibrary.find(e => e.name === name);
         setBlocks(b => [...b, {
             id: Date.now(), exercise: name, category: meta?.category ?? "Other",
             sets: [{ id: Date.now(), sets: 3, reps: 5, weight: 60, rpe: 8 }],
         }]);
         setShowPicker(false);
+    }, [exerciseLibrary]);
+
+    const handleCreateAndSelect = useCallback(async (name, category) => {
+        const { data, error } = await dbAddCustomExercise(name, category);
+        if (error) return { data: null, error };
+        setExerciseLibrary(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+        setBlocks(b => [...b, {
+            id: Date.now(), exercise: data.name, category: data.category,
+            sets: [{ id: Date.now(), sets: 3, reps: 5, weight: 60, rpe: 8 }],
+        }]);
+        setShowPicker(false);
+        return { data, error: null };
     }, []);
 
     const updateBlock = (id, block) => setBlocks(b => b.map(x => x.id === id ? block : x));
@@ -954,17 +1010,12 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
     const totalVolume = blocks.reduce((a, b) => a + totalVol(b.sets), 0);
     const totalSets   = blocks.reduce((a, b) => a + b.sets.reduce((s, r) => s + r.sets, 0), 0);
 
-    // ── Save session to Supabase ──────────────────────────────
     const handleSaveSession = async () => {
         if (blocks.length === 0) { showToast("Add at least one exercise first."); return; }
         setSavingSession(true);
         try {
-            const { session, error } = await dbSaveSession({
-                name: sessionName, blocks, totalVolume, totalSets, readiness,
-            });
+            const { error } = await dbSaveSession({ name: sessionName, blocks, totalVolume, totalSets, readiness });
             if (error) throw error;
-
-            // Optimistically prepend to history and refresh PRs
             const { data: fresh } = await fetchSessionHistory(30, 0);
             if (fresh) setSavedSessions(fresh);
             await refreshPRs();
@@ -977,16 +1028,20 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
         }
     };
 
-    const clearSession = () => { if (confirm("Clear this session?")) { setBlocks([]); setReadiness({ bodyweight:"", bwUnit:"kg", sleep:"", hitMacros:null }); setSessionName(`${dayName()} Session`); } };
+    const clearSession = () => {
+        if (confirm("Clear this session?")) {
+            setBlocks([]);
+            setReadiness({ bodyweight:"", bwUnit:"kg", sleep:"", hitMacros:null });
+            setSessionName(`${dayName()} Session`);
+        }
+    };
 
-    // ── Templates ─────────────────────────────────────────────
     const handleSaveTemplate = async (templateName) => {
         setSavingTemplate(true);
         try {
             const exercises = blocks.map(b => ({ name: b.exercise, category: b.category, defaultSets: b.sets.length }));
-            const { data, error } = await dbSaveTemplate(templateName, exercises);
+            const { error } = await dbSaveTemplate(templateName, exercises);
             if (error) throw error;
-            // Re-fetch for consistency
             const { data: fresh } = await dbFetchTemplates();
             if (fresh) setTemplates(fresh);
             setShowSaveTemplate(false);
@@ -1028,36 +1083,21 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
         }
     };
 
-    const rpeColor = (rpe) => {
-        if (rpe <= 7) return "text-green-400";
-        if (rpe <= 8) return "text-amber-400";
-        if (rpe <= 9) return "text-orange-400";
-        return "text-red-400";
-    };
-
-    // ── Initial loading splash ────────────────────────────────
     if (initLoading) return <PageLoader label="FETCHING YOUR DATA…" />;
 
-    // ── Render ────────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-zinc-950 text-zinc-100" style={{ fontFamily:"'IBM Plex Mono',monospace" }}>
 
-            {/* ── App Header ── */}
             <header className="border-b border-zinc-800 px-4 py-4 sticky top-0 z-20 bg-zinc-950/95 backdrop-blur">
                 <div className="max-w-2xl mx-auto flex items-center justify-between">
-
-                    {/* 1. Logo Area (Added shrink-0 and mr-4) */}
-                    <div className="shrink-0 mr-4">
+                    <div>
                         <div className="text-amber-500 font-bold text-lg tracking-tight leading-none">
                             STR<span className="text-zinc-400">/</span>VOL
                         </div>
                         <div className="text-zinc-600 text-xs mt-0.5">STRENGTH &amp; VOLUME TRACKER</div>
                     </div>
-
-                    {/* 2. Navigation Area (Added flex-1, justify-end, and min-w-0) */}
-                    <div className="flex items-center gap-3 flex-1 justify-end min-w-0">
-                        {/* View tabs */}
-                        <div className="flex gap-1 overflow-x-auto no-scrollbar min-w-0">
+                    <div className="flex items-center gap-3">
+                        <div className="flex gap-1 overflow-x-auto no-scrollbar">
                             {[
                                 { id: "log",         label: "LOG"         },
                                 { id: "history",     label: "HISTORY"     },
@@ -1069,33 +1109,27 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                 <button key={id} onClick={() => setView(id)}
                                         className={`shrink-0 px-3 py-1.5 text-xs rounded transition-colors uppercase tracking-widest
                     ${view === id
-                                            ? id === "coach"
-                                                ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold"
-                                                : id === "nutrition"
-                                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold"
-                                                    : id === "analytics"
-                                                        ? "bg-violet-500/20 text-violet-400 border border-violet-500/40 font-bold"
-                                                        : id === "leaderboard"
-                                                            ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 font-bold"
+                                            ? id === "coach"       ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold"
+                                                : id === "nutrition"   ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold"
+                                                    : id === "analytics"   ? "bg-violet-500/20 text-violet-400 border border-violet-500/40 font-bold"
+                                                        : id === "leaderboard" ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 font-bold"
                                                             : "bg-amber-500 text-zinc-900 font-bold"
                                             : "text-zinc-500 hover:text-zinc-300"}`}>
                                     {label}
                                 </button>
                             ))}
                         </div>
-
-                        {/* User avatar + sign-out */}
                         {user && (
-                            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800 shrink-0">
+                            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
                                 <div className="w-7 h-7 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0"
                                      title={user.user_metadata?.display_name || user.email}>
-                                  <span className="text-amber-400 text-xs font-bold leading-none select-none">
-                                    {(user.user_metadata?.display_name || user.email || "?").charAt(0).toUpperCase()}
-                                  </span>
+                  <span className="text-amber-400 text-xs font-bold leading-none select-none">
+                    {(user.user_metadata?.display_name || user.email || "?").charAt(0).toUpperCase()}
+                  </span>
                                 </div>
                                 {onSignOut && (
                                     <button onClick={onSignOut} aria-label="Sign out" title="Sign out"
-                                            className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                                            className="text-zinc-600 hover:text-red-400 transition-colors">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                                             <polyline points="16 17 21 12 16 7"/>
@@ -1111,27 +1145,23 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
 
             <main className="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
-                {/* Toast */}
                 {toast && (
                     <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-zinc-900 px-4 py-2 rounded text-sm font-bold shadow-xl animate-pulse">
                         {toast}
                     </div>
                 )}
 
-                {/* ══════════════════ LOG VIEW ══════════════════════ */}
+                {/* LOG */}
                 {view === "log" && (
                     <>
-                        {/* Session name + date */}
                         <div className="flex items-center gap-3">
                             <input value={sessionName} onChange={e => setSessionName(e.target.value)}
                                    className="bg-transparent border-b border-zinc-700 focus:border-amber-500 outline-none text-zinc-200 font-bold text-base flex-1 pb-1 transition-colors" />
                             <span className="text-zinc-600 text-xs">{new Date().toLocaleDateString()}</span>
                         </div>
 
-                        {/* Readiness module */}
                         <ReadinessModule readiness={readiness} onChange={setReadiness} />
 
-                        {/* Stats bar */}
                         <div className="grid grid-cols-3 gap-3">
                             {[
                                 { label:"EXERCISES",  value: blocks.length },
@@ -1145,13 +1175,11 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                             ))}
                         </div>
 
-                        {/* Rest timer */}
                         <RestTimer onComplete={() => { setTimerDone(true); setTimeout(() => setTimerDone(false), 3000); }} />
                         {timerDone && (
                             <div className="text-center text-green-400 text-sm font-bold animate-bounce">✓ REST COMPLETE — NEXT SET</div>
                         )}
 
-                        {/* Empty state */}
                         {blocks.length === 0 && (
                             <div className="text-center py-12 text-zinc-700 text-sm border border-dashed border-zinc-800 rounded-lg">
                                 No exercises yet.<br />
@@ -1159,7 +1187,6 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                             </div>
                         )}
 
-                        {/* Exercise blocks */}
                         {blocks.map(b => (
                             <ExerciseBlock key={b.id} block={b}
                                            onChange={b => updateBlock(b.id, b)}
@@ -1167,13 +1194,11 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                            historicalPRs={historicalPRs} />
                         ))}
 
-                        {/* Action grid */}
                         <div className="grid grid-cols-2 gap-3 pt-2">
                             <button onClick={() => setShowPicker(true)}
                                     className="py-3 border border-zinc-600 text-zinc-300 hover:border-amber-500 hover:text-amber-400 font-bold text-xs rounded-lg transition-colors tracking-widest">
                                 + EXERCISE
                             </button>
-
                             <button onClick={() => setShowLoadTemplate(true)}
                                     className="py-3 border border-zinc-600 text-zinc-300 hover:border-amber-500 hover:text-amber-400 font-bold text-xs rounded-lg transition-colors tracking-widest flex items-center justify-center gap-2">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0">
@@ -1189,7 +1214,6 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                   </span>
                                 )}
                             </button>
-
                             <button onClick={() => { if (blocks.length === 0) { showToast("Add exercises first."); return; } setShowSaveTemplate(true); }}
                                     className="py-3 border border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 font-bold text-xs rounded-lg transition-colors tracking-widest flex items-center justify-center gap-2">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0">
@@ -1199,7 +1223,6 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                 </svg>
                                 SAVE TEMPLATE
                             </button>
-
                             <button onClick={handleSaveSession} disabled={savingSession}
                                     className={`py-3 font-bold text-xs rounded-lg transition-colors tracking-widest flex items-center justify-center gap-2
                   ${savingSession ? "bg-amber-600 text-zinc-900 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-400 text-zinc-900"}`}>
@@ -1215,20 +1238,16 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                     </>
                 )}
 
-                {/* ══════════════════ HISTORY VIEW ═════════════════ */}
+                {/* HISTORY */}
                 {view === "history" && (
                     <div className="space-y-3">
                         <div className="text-zinc-500 text-xs tracking-widest uppercase mb-4">Session History</div>
-
-                        {/* Progress chart — reads from Supabase */}
-                        <ProgressChart />
-
+                        <ProgressChart exerciseLibrary={exerciseLibrary} />
                         {savedSessions.length === 0 && (
                             <div className="text-center py-12 text-zinc-700 text-sm border border-dashed border-zinc-800 rounded-lg">
                                 No sessions saved yet.
                             </div>
                         )}
-
                         {savedSessions.map(s => (
                             <div key={s.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
                                 <div className="flex justify-between items-start mb-3">
@@ -1243,8 +1262,6 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                         <div className="text-zinc-600 text-xs">{s.total_sets} sets</div>
                                     </div>
                                 </div>
-
-                                {/* Readiness strip */}
                                 {(s.bodyweight || s.sleep_hours != null || s.hit_macros != null) && (
                                     <div className="flex items-center gap-3 mb-2.5 px-2.5 py-2 bg-zinc-800/60 border border-zinc-800 rounded">
                                         {s.bodyweight && (
@@ -1276,11 +1293,9 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                                         )}
                                     </div>
                                 )}
-
-                                {/* Per-exercise breakdown from session_summary view */}
                                 <div className="space-y-1.5">
                                     {(s.blocks || []).map((b, bi) => {
-                                        const maxE1rm = b.max_e1rm  ? Number(b.max_e1rm).toFixed(1) : "—";
+                                        const maxE1rm = b.max_e1rm ? Number(b.max_e1rm).toFixed(1) : "—";
                                         return (
                                             <div key={bi} className="flex justify-between items-center text-xs border-t border-zinc-800 pt-1.5">
                                                 <span className="text-zinc-400">{b.exercise}</span>
@@ -1296,68 +1311,78 @@ export default function StrengthTracker({ user, onSignOut, coachComponent, nutri
                         ))}
                     </div>
                 )}
-                {/* ══════════════════ LEADERBOARD VIEW ════════════ */}
+
+                {/* LEADERBOARD */}
                 {view === "leaderboard" && (
                     <div>
                         {leaderboardComponent ?? (
-                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
-                                Leaderboard unavailable.
-                            </div>
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">Leaderboard unavailable.</div>
                         )}
                     </div>
                 )}
 
-                {/* ══════════════════ ANALYTICS VIEW ══════════════ */}
+                {/* ANALYTICS */}
                 {view === "analytics" && (
                     <div>
                         {analyticsComponent ?? (
-                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
-                                Analytics dashboard unavailable.
-                            </div>
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">Analytics dashboard unavailable.</div>
                         )}
                     </div>
                 )}
 
-                {/* ══════════════════ NUTRITION VIEW ══════════════ */}
+                {/* NUTRITION */}
                 {view === "nutrition" && (
                     <div>
                         {nutritionComponent ?? (
-                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">
-                                Nutrition tracker unavailable.
-                            </div>
+                            <div className="flex items-center justify-center py-16 text-zinc-700 text-sm">Nutrition tracker unavailable.</div>
                         )}
                     </div>
                 )}
 
-                {/* ══════════════════ COACH VIEW ══════════════════ */}
+                {/* COACH */}
                 {view === "coach" && (
                     <div className="-mx-4 -my-6 flex flex-col" style={{ height:"calc(100vh - 69px)" }}>
                         {coachComponent ?? (
-                            <div className="flex-1 flex items-center justify-center text-zinc-700 text-sm">
-                                AI Coach unavailable.
-                            </div>
+                            <div className="flex-1 flex items-center justify-center text-zinc-700 text-sm">AI Coach unavailable.</div>
                         )}
                     </div>
                 )}
 
             </main>
 
-            {/* Footer — hidden on full-screen tabs */}
             {view !== "coach" && view !== "nutrition" && view !== "analytics" && view !== "leaderboard" && (
                 <footer className="text-center text-zinc-800 text-xs py-8 border-t border-zinc-900 mt-10">
                     STR/VOL v1.0 · Supabase
                 </footer>
             )}
 
-            {/* Modals */}
             {showPicker && (
-                <ExercisePickerModal onSelect={addExercise} onClose={() => setShowPicker(false)} alreadyAdded={blocks.map(b => b.exercise)} />
+                <ExercisePickerModal
+                    onSelect={addExercise}
+                    onClose={() => setShowPicker(false)}
+                    onCreateAndSelect={handleCreateAndSelect}
+                    alreadyAdded={blocks.map(b => b.exercise)}
+                    exerciseLibrary={exerciseLibrary}
+                />
             )}
             {showSaveTemplate && (
-                <SaveTemplateModal blocks={blocks} onSave={handleSaveTemplate} onClose={() => setShowSaveTemplate(false)} saving={savingTemplate} />
+                <SaveTemplateModal
+                    blocks={blocks}
+                    onSave={handleSaveTemplate}
+                    onClose={() => setShowSaveTemplate(false)}
+                    saving={savingTemplate}
+                />
             )}
             {showLoadTemplate && (
-                <LoadTemplatePanel templates={templates} onLoad={handleLoadTemplate} onDelete={handleDeleteTemplate} onClose={() => setShowLoadTemplate(false)} loadingId={templateLoadingId} deletingId={templateDeletingId} />
+                <LoadTemplatePanel
+                    templates={templates}
+                    exerciseLibrary={exerciseLibrary}
+                    onLoad={handleLoadTemplate}
+                    onDelete={handleDeleteTemplate}
+                    onClose={() => setShowLoadTemplate(false)}
+                    loadingId={templateLoadingId}
+                    deletingId={templateDeletingId}
+                />
             )}
 
             <style>{`
