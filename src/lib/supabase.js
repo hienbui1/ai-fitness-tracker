@@ -545,3 +545,141 @@ export async function addCustomExercise(name, category, tags = ["custom"]) {
         .select("id, name, category, tags, user_id")
         .single();
 }
+// ─────────────────────────────────────────────────────────────────
+//  STR/VOL  —  Itemized nutrition Supabase helpers
+//  Replace / merge these into src/lib/supabase.js
+// ─────────────────────────────────────────────────────────────────
+//  These helpers replace the old saveDailyNutrition that accepted
+//  bare macro totals.  The new approach:
+//    • Each day's record stores a JSONB `entries` array.
+//    • Macro totals (calories, protein_g, carbs_g, fats_g) are
+//      always computed from that array and written in the same
+//      upsert — they are derived columns, never set directly.
+//    • fetchNutritionHistory and deleteNutritionEntry are unchanged
+//      but included here for completeness.
+// ─────────────────────────────────────────────────────────────────
+
+import { supabase } from "./supabaseClient"; // adjust path if needed
+
+// ── computeTotals ────────────────────────────────────────────────
+//  Given an array of food-item objects, return the rolled-up macro
+//  totals that are persisted as top-level columns.
+function computeTotals(entries = []) {
+    return entries.reduce(
+        (acc, item) => ({
+            calories:  acc.calories  + Math.round(item.calories  ?? 0),
+            protein_g: acc.protein_g + Math.round((item.protein_g ?? 0) * 10) / 10,
+            carbs_g:   acc.carbs_g   + Math.round((item.carbs_g   ?? 0) * 10) / 10,
+            fats_g:    acc.fats_g    + Math.round((item.fats_g    ?? 0) * 10) / 10,
+        }),
+        { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 }
+    );
+}
+
+// ── saveDailyNutrition ───────────────────────────────────────────
+//  Upserts the full day record with the complete entries array.
+//  Totals are derived from the entries here, not passed by the caller.
+//
+//  params:
+//    log_date  — "YYYY-MM-DD"
+//    entries   — complete array of food-item objects for the day
+//    notes     — optional string
+//
+//  returns { data, error }
+export async function saveDailyNutrition({ log_date, entries = [], notes = null }) {
+    const totals = computeTotals(entries);
+
+    const { data, error } = await supabase
+        .from("daily_nutrition")
+        .upsert(
+            {
+                user_id:   (await supabase.auth.getUser()).data.user?.id,
+                log_date,
+                entries,
+                notes,
+                ...totals,             // calories, protein_g, carbs_g, fats_g
+                updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,log_date" }
+        )
+        .select()
+        .single();
+
+    return { data, error };
+}
+
+// ── logFoodItem ───────────────────────────────────────────────────
+//  Convenience helper: fetches today's record, appends one item,
+//  then calls saveDailyNutrition.  Useful if you only ever want to
+//  add a single item without managing the full entries array.
+//
+//  item shape: { id, name, brand?, calories, protein_g, carbs_g,
+//               fats_g, servings, serving_unit?, timestamp }
+//
+//  returns { data, error }
+export async function logFoodItem(log_date, item) {
+    // Fetch the current day's entries (if any)
+    const { data: existing, error: fetchErr } = await supabase
+        .from("daily_nutrition")
+        .select("entries, notes")
+        .eq("user_id", (await supabase.auth.getUser()).data.user?.id)
+        .eq("log_date", log_date)
+        .maybeSingle();
+
+    if (fetchErr) return { data: null, error: fetchErr };
+
+    const currentEntries = existing?.entries ?? [];
+    const notes          = existing?.notes   ?? null;
+    const newEntries     = [...currentEntries, item];
+
+    return saveDailyNutrition({ log_date, entries: newEntries, notes });
+}
+
+// ── removeFoodItem ────────────────────────────────────────────────
+//  Removes one item (by its id) from the day's entries and re-saves.
+//  returns { data, error }
+export async function removeFoodItem(log_date, itemId) {
+    const userId = (await supabase.auth.getUser()).data.user?.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+        .from("daily_nutrition")
+        .select("entries, notes")
+        .eq("user_id", userId)
+        .eq("log_date", log_date)
+        .maybeSingle();
+
+    if (fetchErr) return { data: null, error: fetchErr };
+
+    const newEntries = (existing?.entries ?? []).filter(e => e.id !== itemId);
+    const notes      = existing?.notes ?? null;
+
+    return saveDailyNutrition({ log_date, entries: newEntries, notes });
+}
+
+// ── fetchNutritionHistory ─────────────────────────────────────────
+//  Returns the last `days` daily_nutrition rows, including entries.
+//  Unchanged from the previous version.
+export async function fetchNutritionHistory(days = 30) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const { data, error } = await supabase
+        .from("daily_nutrition")
+        .select("*")
+        .gte("log_date", since.toISOString().split("T")[0])
+        .order("log_date", { ascending: false });
+
+    return { data, error };
+}
+
+// ── deleteNutritionEntry ──────────────────────────────────────────
+//  Deletes the entire day's record by row UUID.
+//  Unchanged from the previous version.
+export async function deleteNutritionEntry(id) {
+    const { error } = await supabase
+        .from("daily_nutrition")
+        .delete()
+        .eq("id", id);
+
+    return { error };
+}
